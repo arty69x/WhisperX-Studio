@@ -1,0 +1,100 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PRISM // WhisperX</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=JetBrains+Mono:wght@500;800&display=swap');
+    
+    :root {
+      --prism-yellow: #FFD700;
+      --prism-red: #FF0000;
+      --prism-green: #00FF00;
+      --prism-black: #000000;
+      --prism-white: #FFFFFF;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--prism-white);
+      color: var(--prism-black);
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+
+    .mono { font-family: 'JetBrains+Mono', monospace; }
+
+    /* Brutalist Industrial Components */
+    .prism-border {
+      border: 3px solid var(--prism-black);
+    }
+    
+    .prism-shadow {
+      box-shadow: 4px 4px 0px 0px var(--prism-black);
+    }
+
+    .prism-shadow-active:active {
+      box-shadow: 0px 0px 0px 0px var(--prism-black);
+      transform: translate(2px, 2px);
+    }
+
+    .prism-card {
+      background: var(--prism-white);
+      border: 3px solid var(--prism-black);
+      box-shadow: 6px 6px 0px 0px var(--prism-black);
+    }
+
+    .prism-btn-black {
+      background: var(--prism-black);
+      color: var(--prism-white);
+      border: 3px solid var(--prism-black);
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .prism-header-tag {
+      background: var(--prism-yellow);
+      border: 2px solid var(--prism-black);
+      padding: 2px 8px;
+      font-weight: 900;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--prism-white); border-left: 2px solid var(--prism-black); }
+    ::-webkit-scrollbar-thumb { background: var(--prism-black); border: 2px solid var(--prism-white); }
+
+    /* Animations */
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .blink { animation: blink 1s step-end infinite; }
+
+    /* Mobile input visibility fix */
+    .keyboard-safe-area {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

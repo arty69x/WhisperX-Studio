@@ -1,0 +1,8 @@
+{
+  "name": "WhisperX Studio: Real Build Mode",
+  "description": "A high-performance UI engineering studio powered by Gemini. Features include real-time screenshot-to-Tailwind conversion with strict base-8 mapping, autonomous AI agent building, and live audio-visual collaboration.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
