@@ -3,6 +3,46 @@ const json = (res: any, status: number, body: unknown) => {
   res.send(JSON.stringify(body));
 };
 
+import { GuardError, type GuardErrorCode, validateOutputSchema } from '../src/guard/validate.ts';
+
+export type AgentValidationCode = 'AGENT_REQUEST_INVALID' | 'AGENT_RESPONSE_INVALID';
+
+export class AgentValidationError extends Error {
+  public readonly code: AgentValidationCode;
+  public readonly causeCode?: GuardErrorCode;
+  public readonly cause?: unknown;
+
+  constructor(code: AgentValidationCode, message: string, causeCode?: GuardErrorCode, cause?: unknown) {
+    super(message);
+    this.name = 'AgentValidationError';
+    this.code = code;
+    this.causeCode = causeCode;
+    this.cause = cause;
+  }
+}
+
+export const validateAgentRequest = (value: unknown) => {
+  try {
+    return validateOutputSchema(value);
+  } catch (error) {
+    if (error instanceof GuardError) {
+      throw new AgentValidationError('AGENT_REQUEST_INVALID', 'Agent request is invalid.', error.code, error);
+    }
+    throw error;
+  }
+};
+
+export const validateAgentResponse = (value: unknown) => {
+  try {
+    return validateOutputSchema(value);
+  } catch (error) {
+    if (error instanceof GuardError) {
+      throw new AgentValidationError('AGENT_RESPONSE_INVALID', 'Agent response is invalid.', error.code, error);
+    }
+    throw error;
+  }
+};
+
 const requireEnv = (name: string) => {
   const value = process.env[name];
   if (!value) {
