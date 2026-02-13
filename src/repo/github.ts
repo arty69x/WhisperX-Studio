@@ -216,6 +216,10 @@ export function createAiBranchName(now = new Date()): string {
 }
 
 function encodeContent(content: string): string {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(content, 'utf8').toString('base64');
+  }
+
   return btoa(unescape(encodeURIComponent(content)));
 }
 
