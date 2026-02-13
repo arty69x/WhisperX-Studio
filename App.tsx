@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AppTab, ChatMessage, GitStatus, AgentStep, AgentRole, RuntimeStatus, TerminalLine, AgentMode } from './types';
+import { AppTab, ChatMessage, GitStatus, AgentStep, AgentRole, RuntimeStatus, TerminalLine, AgentMode, AgentJobStatus, AgentJobError } from './types';
 import { geminiService } from './services/geminiService';
 import { logger } from './services/loggerService';
 import LiveAudioSession from './components/LiveAudioSession';
@@ -34,15 +34,18 @@ const App: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const [gitStatus, setGitStatus] = useState<GitStatus>({
-    branch: 'MAIN_KERNEL',
-    branches: ['MAIN_KERNEL', 'AGENT_UPLINK'],
+    branch: 'loading...',
+    branches: [],
     stagedFiles: [],
-    modifiedFiles: ['App.tsx', 'services/geminiService.ts'],
+    modifiedFiles: [],
     isInitialized: true,
     isGitHubConnected: false,
     aheadCount: 0,
     behindCount: 0
   });
+  const [agentJob, setAgentJob] = useState<AgentJobStatus | null>(null);
+  const [agentError, setAgentError] = useState<AgentJobError | null>(null);
+  const [isGitLoading, setIsGitLoading] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const traceStoreRef = useRef(new ExecutionTraceStore());
@@ -61,6 +64,28 @@ const App: React.FC = () => {
       }
     }
   }, []);
+
+  useEffect(() => {
+    fetchGitStatus();
+  }, []);
+
+
+  const fetchGitStatus = async () => {
+    setIsGitLoading(true);
+    try {
+      const response = await fetch('/api/agent');
+      if (!response.ok) throw new Error('Unable to fetch git status');
+      const data = await response.json();
+      setGitStatus(prev => ({ ...prev, branch: data.branch || prev.branch, modifiedFiles: data.changedFiles || [] }));
+      if (data.latestJob) {
+        setAgentJob(data.latestJob);
+      }
+    } catch (error) {
+      logger.warn('Git sync status unavailable');
+    } finally {
+      setIsGitLoading(false);
+    }
+  };
 
   const saveProject = () => {
     const state = { code: pendingCode, messages };
@@ -221,12 +246,20 @@ const App: React.FC = () => {
       const isConfirmation = lowerInput.includes('ยืนยัน') || lowerInput.includes('confirm');
 
       if (isConfirmation && messages.length > 0) {
-        if (agentMode === AgentMode.MULTI) {
-          for (let i = 0; i < initialSteps.length; i++) {
-            setPipelineSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'active' } : s));
-            await new Promise(r => setTimeout(r, 600));
-            setPipelineSteps(prev => prev.map((s, idx) => idx === i ? { ...s, status: 'complete' } : s));
-          }
+        addTerminalLine('system', 'AGENT_CORE: REQUESTING /api/agent ...');
+        setAgentError(null);
+
+        const startResponse = await fetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instruction, mode: agentMode })
+        });
+
+        const startData = await startResponse.json();
+        if (!startResponse.ok) {
+          setAgentError(startData.error || { code: 'UNKNOWN', message: 'Unknown backend error' });
+          setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'error' })));
+          return;
         }
 
         traceStoreRef.current.push('analyze', 'start', 'Building retrieval index');
@@ -280,8 +313,8 @@ const App: React.FC = () => {
           timestamp: Date.now(),
           agentRole: role
         }]);
-        setPendingCode(build.code);
-        addTerminalLine('output', 'ARTIFACT_MOUNTED_SUCCESSFULLY');
+        addTerminalLine('output', `AGENT_JOB_COMPLETED: ${currentJob.jobId}`);
+        fetchGitStatus();
       } else {
         const response = await geminiService.agentChat(instruction, messages.slice(-10), role);
         setMessages(prev => [...prev, { 
@@ -295,6 +328,7 @@ const App: React.FC = () => {
       }
     } catch (e) {
       logger.error("Neural Link Fault: Connection lost.");
+      setAgentError({ code: 'UNKNOWN', message: 'Failed to communicate with backend agent.' });
       setPipelineSteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error' } : s));
     } finally {
       traceStoreRef.current.all().forEach(entry => {
@@ -401,6 +435,12 @@ const App: React.FC = () => {
                     )}
 
                     <div className="space-y-8">
+                      {agentError && (
+                        <div className="prism-card p-4 border-red-600 bg-red-50 text-red-700 space-y-2">
+                          <h4 className="text-[10px] font-black uppercase">Agent_Error: {agentError.code}</h4>
+                          <p className="text-xs font-bold">{agentError.message}</p>
+                        </div>
+                      )}
                       {messages.map(m => (
                         <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} gap-2 animate-in slide-in-from-bottom-2`}>
                           <div className="flex items-center gap-2">
@@ -511,7 +551,7 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              {activeTab === AppTab.GIT && <GitTab status={gitStatus} onAction={() => {}} />}
+              {activeTab === AppTab.GIT && <GitTab data={{ branch: gitStatus.branch, changedFiles: gitStatus.modifiedFiles, latestJob: agentJob }} isLoading={isGitLoading} onRefresh={fetchGitStatus} />}
               {activeTab === AppTab.SETTINGS && (
                 <div className="max-w-2xl mx-auto space-y-8">
                   <GitConfigForm />
