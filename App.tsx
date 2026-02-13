@@ -256,6 +256,9 @@ const App: React.FC = () => {
         });
 
         const startData = await startResponse.json();
+        if (startData?.latestJob) {
+          setAgentJob(startData.latestJob);
+        }
         if (!startResponse.ok) {
           setAgentError(startData.error || { code: 'UNKNOWN', message: 'Unknown backend error' });
           setPipelineSteps(prev => prev.map(s => ({ ...s, status: 'error' })));
@@ -313,7 +316,7 @@ const App: React.FC = () => {
           timestamp: Date.now(),
           agentRole: role
         }]);
-        addTerminalLine('output', `AGENT_JOB_COMPLETED: ${currentJob.jobId}`);
+        addTerminalLine('output', `AGENT_JOB_COMPLETED: ${startData?.latestJob?.jobId || 'n/a'}`);
         fetchGitStatus();
       } else {
         const response = await geminiService.agentChat(instruction, messages.slice(-10), role);
