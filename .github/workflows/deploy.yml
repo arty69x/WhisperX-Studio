@@ -1,0 +1,91 @@
+name: Deploy (GitHub Pages + Vercel)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "deploy"
+  cancel-in-progress: true
+
+jobs:
+  deploy_pages:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (Pages)
+        env:
+          # Vite client env (ถ้าใช้จริงค่อยใส่)
+          VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
+          VITE_LLM_PROVIDER: ${{ secrets.VITE_LLM_PROVIDER }}
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+
+          # สำคัญสำหรับ GitHub Pages แบบ project page: "/repo-name/"
+          # ตั้งใน GitHub Secrets: VITE_BASE_PATH="/<repo-name>/"
+          VITE_BASE_PATH: ${{ secrets.VITE_BASE_PATH }}
+        run: npm run build
+
+      - name: Upload artifact (Pages)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+      - name: Deploy (Pages)
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  deploy_vercel:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    needs: deploy_pages
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (Vercel)
+        env:
+          # สำหรับ Vercel ปกติ base ควรเป็น "/"
+          VITE_BASE_PATH: "/"
+
+          VITE_APP_NAME: ${{ secrets.VITE_APP_NAME }}
+          VITE_LLM_PROVIDER: ${{ secrets.VITE_LLM_PROVIDER }}
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+        run: npm run build
+
+      - name: Deploy to Vercel (Production)
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: "--prod"
+          working-directory: ./
