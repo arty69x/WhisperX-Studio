@@ -1,11 +1,12 @@
 {
-  "name": "whisperx-studio:-real-build-mode",
+  "name": "whisperx-studio-real-build-mode",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "export": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
