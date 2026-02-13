@@ -1,184 +1,168 @@
-import { execSync } from 'node:child_process';
-
-interface AgentStep {
-  id: string;
-  label: string;
-  status: 'pending' | 'active' | 'complete' | 'error';
-  timestamp: number;
-}
-
-type AgentJobState = 'queued' | 'running' | 'completed' | 'failed';
-type AgentErrorCode = 'GITHUB_TOKEN_INVALID' | 'RATE_LIMIT' | 'CONFLICT' | 'VALIDATION_FAIL' | 'UNKNOWN';
-
-interface AgentJob {
-  jobId: string;
-  status: AgentJobState;
-  steps: AgentStep[];
-  branch: string;
-  changedFiles: string[];
-  prUrl?: string;
-  error?: { code: AgentErrorCode; message: string };
-  createdAt: number;
-}
-
-const globalStore = globalThis as typeof globalThis & { __agentJobs?: Map<string, AgentJob> };
-if (!globalStore.__agentJobs) {
-  globalStore.__agentJobs = new Map<string, AgentJob>();
-}
-
-const jobs = globalStore.__agentJobs;
-
-const readGitMetadata = () => {
-  const safeExec = (cmd: string, fallback = '') => {
-    try {
-      return execSync(cmd, { encoding: 'utf8' }).trim();
-    } catch {
-      return fallback;
-    }
-  };
-
-  const branch = safeExec('git rev-parse --abbrev-ref HEAD', 'unknown');
-  const changedFiles = safeExec('git status --porcelain')
-    .split('\n')
-    .map(line => line.trim().slice(3).trim())
-    .filter(Boolean);
-
-  return { branch, changedFiles };
+const json = (res: any, status: number, body: unknown) => {
+  res.status(status).setHeader('Content-Type', 'application/json');
+  res.send(JSON.stringify(body));
 };
 
-const createSteps = (mode: string): AgentStep[] => {
-  const now = Date.now();
-  if (mode === 'MULTI') {
-    return [
-      { id: '1', label: 'วิเคราะห์โครงสร้าง (Analysis)', status: 'pending', timestamp: now },
-      { id: '2', label: 'สังเคราะห์ส่วนหน้า (Frontend)', status: 'pending', timestamp: now },
-      { id: '3', label: 'ตรวจสอบระบบ (Validation)', status: 'pending', timestamp: now }
-    ];
+const requireEnv = (name: string) => {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
   }
-  return [{ id: '1', label: 'ประมวลผลงาน: FRONTEND', status: 'pending', timestamp: now }];
+  return value;
 };
 
-const toError = (code: AgentErrorCode, message: string) => ({ code, message });
+const LIVE_SESSION_TTL_MS = 5 * 60 * 1000;
+const liveSessions = new Map<string, { systemInstruction: string; expiresAt: number }>();
 
-const resolveSimulatedError = (instruction: string): { code: AgentErrorCode; message: string } | undefined => {
-  const text = instruction.toLowerCase();
-  if (text.includes('rate limit')) return toError('RATE_LIMIT', 'GitHub API rate limit exceeded. Please wait and retry.');
-  if (text.includes('conflict')) return toError('CONFLICT', 'Merge conflict detected in generated branch.');
-  if (text.includes('validation fail')) return toError('VALIDATION_FAIL', 'Validation failed: workflow checks did not pass.');
-  return undefined;
+const createLiveSession = (systemInstruction: string) => {
+  const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  liveSessions.set(sessionId, {
+    systemInstruction,
+    expiresAt: Date.now() + LIVE_SESSION_TTL_MS,
+  });
+  return sessionId;
 };
 
-const validateGithubToken = async (token?: string): Promise<{ valid: boolean; rateLimited?: boolean }> => {
-  if (!token) return { valid: false };
-  const response = await fetch('https://api.github.com/user', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json'
-    }
+const getLiveSession = (sessionId: string) => {
+  const session = liveSessions.get(sessionId);
+  if (!session || session.expiresAt < Date.now()) {
+    liveSessions.delete(sessionId);
+    return null;
+  }
+  return session;
+};
+
+const geminiRequest = async (payload: unknown) => {
+  const apiKey = requireEnv('GEMINI_API_KEY');
+  const model = 'gemini-2.5-flash';
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 
-  if (response.status === 401) return { valid: false };
-  if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0') {
-    return { valid: true, rateLimited: true };
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gemini API error (${response.status}): ${detail}`);
   }
 
-  return { valid: response.ok };
+  return response.json();
 };
 
-const runJob = (jobId: string, requestedError?: { code: AgentErrorCode; message: string }) => {
-  const job = jobs.get(jobId);
-  if (!job) return;
+const openAIChat = async (body: any) => {
+  const apiKey = requireEnv('OPENAI_API_KEY');
+  const model = body.model || 'gpt-4o-mini';
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: body.messages,
+      temperature: body.temperature ?? 0.5,
+    }),
+  });
 
-  job.status = 'running';
-  jobs.set(jobId, { ...job });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI API error (${response.status}): ${detail}`);
+  }
 
-  let currentStep = 0;
-  const interval = setInterval(() => {
-    const latest = jobs.get(jobId);
-    if (!latest) {
-      clearInterval(interval);
-      return;
-    }
+  return response.json();
+};
 
-    latest.steps = latest.steps.map((step, idx) => {
-      if (idx < currentStep) return { ...step, status: 'complete' };
-      if (idx === currentStep) return { ...step, status: 'active' };
-      return step;
-    });
+const ollamaChat = async (body: any) => {
+  const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: body.model || 'llama3.1:8b',
+      messages: body.messages,
+      stream: false,
+    }),
+  });
 
-    if (requestedError && currentStep === latest.steps.length - 1) {
-      latest.status = 'failed';
-      latest.steps = latest.steps.map((step, idx) => idx === currentStep ? { ...step, status: 'error' } : step);
-      latest.error = requestedError;
-      jobs.set(jobId, { ...latest });
-      clearInterval(interval);
-      return;
-    }
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Ollama API error (${response.status}): ${detail}`);
+  }
 
-    if (currentStep >= latest.steps.length) {
-      latest.status = 'completed';
-      latest.prUrl = process.env.MOCK_PR_URL || `https://github.com/example/repo/pull/${Math.floor(Math.random() * 900 + 100)}`;
-      latest.steps = latest.steps.map(step => ({ ...step, status: 'complete' }));
-      jobs.set(jobId, { ...latest });
-      clearInterval(interval);
-      return;
-    }
-
-    jobs.set(jobId, { ...latest });
-    currentStep += 1;
-  }, 1200);
+  return response.json();
 };
 
 export default async function handler(req: any, res: any) {
-  if (req.method === 'GET') {
-    const jobId = req.query?.jobId as string | undefined;
-    if (jobId) {
-      const job = jobs.get(jobId);
-      if (!job) return res.status(404).json({ error: 'Job not found' });
-      return res.status(200).json(job);
-    }
-
-    const repo = readGitMetadata();
-    const latestJob = [...jobs.values()].sort((a, b) => b.createdAt - a.createdAt)[0];
-    return res.status(200).json({ branch: repo.branch, changedFiles: repo.changedFiles, latestJob });
+  if (req.method !== 'POST') {
+    return json(res, 405, { error: 'Method not allowed' });
   }
 
-  if (req.method === 'POST') {
-    const { instruction = '', mode = 'SOLO', githubToken } = req.body || {};
-    const { branch, changedFiles } = readGitMetadata();
+  try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
 
-    const tokenCheck = await validateGithubToken(githubToken || process.env.GITHUB_TOKEN);
-    if (!tokenCheck.valid) {
-      return res.status(401).json({
-        error: toError('GITHUB_TOKEN_INVALID', 'GitHub token is invalid or missing.'),
-        branch,
-        changedFiles
+    if (body.provider === 'gemini' && body.action === 'chat') {
+      const data = await geminiRequest(body.payload);
+      return json(res, 200, data);
+    }
+
+    if (body.provider === 'gemini' && body.action === 'live-session') {
+      const systemInstruction = body.systemInstruction || 'You are WhisperX Voice assistant. Help with architecture.';
+      const sessionId = createLiveSession(systemInstruction);
+      return json(res, 200, {
+        sessionId,
+        expiresInMs: LIVE_SESSION_TTL_MS,
       });
     }
 
-    if (tokenCheck.rateLimited) {
-      return res.status(429).json({
-        error: toError('RATE_LIMIT', 'GitHub API rate limit exceeded. Please wait before retrying.'),
-        branch,
-        changedFiles
+    if (body.provider === 'gemini' && body.action === 'live-turn') {
+      const session = getLiveSession(body.sessionId);
+      if (!session) {
+        return json(res, 401, { error: 'Live session expired. Please reconnect.' });
+      }
+
+      const data = await geminiRequest({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  data: body.audio,
+                  mimeType: 'audio/pcm;rate=16000',
+                },
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+        },
+        systemInstruction: {
+          parts: [{ text: session.systemInstruction }],
+        },
+      });
+
+      const candidates = data.candidates || [];
+      const parts = candidates[0]?.content?.parts || [];
+      const audioPart = parts.find((part: any) => part.inlineData?.data);
+      return json(res, 200, {
+        audio: audioPart?.inlineData?.data || null,
       });
     }
 
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const job: AgentJob = {
-      jobId,
-      status: 'queued',
-      steps: createSteps(mode),
-      branch,
-      changedFiles,
-      createdAt: Date.now()
-    };
+    if (body.provider === 'openai' && body.action === 'chat') {
+      const data = await openAIChat(body);
+      return json(res, 200, data);
+    }
 
-    jobs.set(jobId, job);
-    runJob(jobId, resolveSimulatedError(instruction));
+    if (body.provider === 'ollama' && body.action === 'chat') {
+      const data = await ollamaChat(body);
+      return json(res, 200, data);
+    }
 
-    return res.status(202).json(job);
+    return json(res, 400, { error: 'Unsupported provider/action' });
+  } catch (error: any) {
+    return json(res, 500, { error: error.message || 'Internal Server Error' });
   }
-
-  return res.status(405).json({ error: 'Method Not Allowed' });
 }
