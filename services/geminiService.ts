@@ -1,9 +1,18 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { logger } from "./loggerService";
 import { AgentRole } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const resolveApiKey = () => {
+  const apiKey = import.meta.env.VITE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env.API_KEY : undefined);
+  if (!apiKey) {
+    logger.error("Gemini API key not configured");
+    throw new Error("Missing Gemini API key");
+  }
+  return apiKey;
+};
+
+const getAI = () => new GoogleGenAI({ apiKey: resolveApiKey() });
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
   try {
