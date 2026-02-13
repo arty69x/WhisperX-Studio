@@ -1,6 +1,4 @@
-
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
+import React, { useState, useRef, useCallback } from 'react';
 
 const decode = (base64: string) => {
   const binaryString = atob(base64);
@@ -39,115 +37,135 @@ interface LiveAudioSessionProps {
 const LiveAudioSession: React.FC<LiveAudioSessionProps> = ({ mini }) => {
   const [isActive, setIsActive] = useState(false);
   const [status, setStatus] = useState('Dormant');
-  
+
   const audioContextRef = useRef<AudioContext | null>(null);
+  const inputContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const nextStartTimeRef = useRef(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-  const sessionRef = useRef<any>(null);
+  const sendingRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
 
-  // Fix: Added source tracking and proper resource cleanup for stopping sessions.
   const stopSession = useCallback(() => {
     setIsActive(false);
     setStatus('Engine Off');
-    
-    // Stop all active audio playback
+
     sourcesRef.current.forEach(source => {
-      try { source.stop(); } catch (e) {}
+      try { source.stop(); } catch (_) {}
     });
     sourcesRef.current.clear();
     nextStartTimeRef.current = 0;
 
+    processorRef.current?.disconnect();
+    inputSourceRef.current?.disconnect();
+    processorRef.current = null;
+    inputSourceRef.current = null;
+
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+
+    inputContextRef.current?.close();
     audioContextRef.current?.close();
+    inputContextRef.current = null;
     audioContextRef.current = null;
-    
-    // Explicitly close the GenAI session
-    if (sessionRef.current) {
-      sessionRef.current.close();
-      sessionRef.current = null;
-    }
+
+    sessionIdRef.current = null;
+    sendingRef.current = false;
   }, []);
+
+  const sendAudioChunk = useCallback(async (base64Audio: string, outputCtx: AudioContext) => {
+    if (!sessionIdRef.current || sendingRef.current) {
+      return;
+    }
+
+    sendingRef.current = true;
+    try {
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'gemini',
+          action: 'live-turn',
+          sessionId: sessionIdRef.current,
+          audio: base64Audio,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Live turn failed');
+      }
+
+      const payload = await response.json();
+      if (!payload.audio) {
+        return;
+      }
+
+      nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
+      const audioBuffer = await decodeAudioData(decode(payload.audio), outputCtx, 24000, 1);
+      const source = outputCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(outputCtx.destination);
+      source.addEventListener('ended', () => sourcesRef.current.delete(source));
+      source.start(nextStartTimeRef.current);
+      sourcesRef.current.add(source);
+      nextStartTimeRef.current += audioBuffer.duration;
+    } catch (error) {
+      console.error('Live stream fault:', error);
+      stopSession();
+    } finally {
+      sendingRef.current = false;
+    }
+  }, [stopSession]);
 
   const startSession = async () => {
     try {
       setIsActive(true);
       setStatus('Initializing...');
-      // Initialize Gemini SDK inside the trigger to ensure fresh context/key usage.
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+      const sessionResponse = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'gemini',
+          action: 'live-session',
+          systemInstruction: 'You are WhisperX Voice assistant. Help with architecture.',
+        }),
+      });
+
+      if (!sessionResponse.ok) {
+        throw new Error('Failed to create ephemeral session');
+      }
+
+      const { sessionId } = await sessionResponse.json();
+      sessionIdRef.current = sessionId;
+
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      inputContextRef.current = inputCtx;
       audioContextRef.current = outputCtx;
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        callbacks: {
-          onopen: () => {
-            setStatus('Active');
-            sessionPromise.then(session => {
-              sessionRef.current = session;
-            });
-            const source = inputCtx.createMediaStreamSource(stream);
-            const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
-            scriptProcessor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
-              // Solely rely on sessionPromise to send data to prevent race conditions.
-              sessionPromise.then(session => {
-                session.sendRealtimeInput({ 
-                  media: { 
-                    data: encode(new Uint8Array(int16.buffer)), 
-                    mimeType: 'audio/pcm;rate=16000' 
-                  } 
-                });
-              });
-            };
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(inputCtx.destination);
-          },
-          onmessage: async (message: LiveServerMessage) => {
-            // Fix: Added interruption handling to clear the playback queue.
-            const interrupted = message.serverContent?.interrupted;
-            if (interrupted) {
-              sourcesRef.current.forEach(source => {
-                try { source.stop(); } catch (e) {}
-              });
-              sourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
-            }
+      const source = inputCtx.createMediaStreamSource(stream);
+      const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+      inputSourceRef.current = source;
+      processorRef.current = scriptProcessor;
 
-            const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64Audio) {
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
-              const audioBuffer = await decodeAudioData(decode(base64Audio), outputCtx, 24000, 1);
-              const source = outputCtx.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(outputCtx.destination);
-              
-              source.addEventListener('ended', () => {
-                sourcesRef.current.delete(source);
-              });
-              
-              // Schedule playback precisely using nextStartTimeRef to ensure gapless audio.
-              source.start(nextStartTimeRef.current);
-              sourcesRef.current.add(source);
-              nextStartTimeRef.current += audioBuffer.duration;
-            }
-          },
-          onerror: (e) => {
-            console.error('Live API Fault:', e);
-            stopSession();
-          },
-          onclose: () => {
-            stopSession();
-          }
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-          systemInstruction: 'You are WhisperX Voice assistant. Help with architecture.'
+      scriptProcessor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          int16[i] = inputData[i] * 32767;
         }
-      });
+        sendAudioChunk(encode(new Uint8Array(int16.buffer)), outputCtx);
+      };
+
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(inputCtx.destination);
+      setStatus('Active');
     } catch (err) {
       console.error('Kernel Activation Failure:', err);
       stopSession();
@@ -156,7 +174,7 @@ const LiveAudioSession: React.FC<LiveAudioSessionProps> = ({ mini }) => {
 
   if (mini) {
     return (
-      <button 
+      <button
         onClick={isActive ? stopSession : startSession}
         className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isActive ? 'bg-red-500 animate-pulse text-white' : 'bg-white/5 text-gray-500 hover:text-white'}`}
         title={isActive ? 'Deactivate Voice' : 'Activate Voice Architect'}
