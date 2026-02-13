@@ -10,11 +10,23 @@ View your app in AI Studio: https://ai.studio/apps/drive/1nATQDiLlnVK_dTh1dS0KHG
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Create `.env.local` for **server-side only** secrets:
+
+   ```bash
+   GEMINI_API_KEY=your_gemini_key
+   OPENAI_API_KEY=your_openai_key_optional
+   OLLAMA_BASE_URL=http://localhost:11434
+   ```
+
 3. Run the app:
    `npm run dev`
+
+## Security model (important)
+
+- All LLM provider keys are stored and used **only on the server** (`/api/agent`).
+- Client code now calls `fetch('/api/agent', ...)` and never reads `process.env.API_KEY` or `VITE_*_API_KEY`.
+- Live audio sessions use a server-created ephemeral session id instead of exposing provider API keys in the browser.
