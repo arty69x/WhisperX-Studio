@@ -1,3 +1,47 @@
+import { GuardError, validateOutputSchema } from '../src/guard/validate.ts';
+
+type AgentValidationCode = 'AGENT_REQUEST_INVALID' | 'AGENT_RESPONSE_INVALID';
+
+export class AgentValidationError extends Error {
+  public readonly code: AgentValidationCode;
+  public readonly causeCode?: string;
+
+  constructor(code: AgentValidationCode, message: string, causeCode?: string) {
+    super(message);
+    this.name = 'AgentValidationError';
+    this.code = code;
+    this.causeCode = causeCode;
+  }
+}
+
+const toAgentValidationError = (
+  code: AgentValidationCode,
+  error: unknown,
+): AgentValidationError => {
+  if (error instanceof GuardError) {
+    return new AgentValidationError(code, error.message, error.code);
+  }
+
+  const message = error instanceof Error ? error.message : 'Unknown validation error';
+  return new AgentValidationError(code, message);
+};
+
+export const validateAgentRequest = (value: unknown) => {
+  try {
+    return validateOutputSchema(value);
+  } catch (error) {
+    throw toAgentValidationError('AGENT_REQUEST_INVALID', error);
+  }
+};
+
+export const validateAgentResponse = (value: unknown) => {
+  try {
+    return validateOutputSchema(value);
+  } catch (error) {
+    throw toAgentValidationError('AGENT_RESPONSE_INVALID', error);
+  }
+};
+
 const json = (res: any, status: number, body: unknown) => {
   res.status(status).setHeader('Content-Type', 'application/json');
   res.send(JSON.stringify(body));
