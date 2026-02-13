@@ -57,6 +57,24 @@ export interface GitStatus {
   lastSync?: number;
 }
 
+export type AgentJobState = 'queued' | 'running' | 'completed' | 'failed';
+export type AgentErrorCode = 'GITHUB_TOKEN_INVALID' | 'RATE_LIMIT' | 'CONFLICT' | 'VALIDATION_FAIL' | 'UNKNOWN';
+
+export interface AgentJobError {
+  code: AgentErrorCode;
+  message: string;
+}
+
+export interface AgentJobStatus {
+  jobId: string;
+  status: AgentJobState;
+  steps: AgentStep[];
+  branch: string;
+  changedFiles: string[];
+  prUrl?: string;
+  error?: AgentJobError;
+}
+
 export interface LogEntry {
   id: string;
   level: 'error' | 'warn' | 'info';
