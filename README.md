@@ -2,31 +2,43 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/drive/1nATQDiLlnVK_dTh1dS0KHGzU28x3-fRg
+# WhisperX Studio
 
 ## Run Locally
 
-**Prerequisites:** Node.js
+**Prerequisites:** Node.js 20+
 
 1. Install dependencies:
    `npm install`
-2. Create `.env.local` for **server-side only** secrets:
+2. Configure environment in `.env.local`:
 
-   ```bash
-   GEMINI_API_KEY=your_gemini_key
-   OPENAI_API_KEY=your_openai_key_optional
-   OLLAMA_BASE_URL=http://localhost:11434
-   ```
+```bash
+# GitHub automation
+GH_TOKEN=xxxxx
+GH_REPO=owner/repo
 
-3. Run the app:
+# LLM providers (choose one as LLM_PROVIDER)
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=xxxxx
+OPENAI_API_KEY=xxxxx
+OLLAMA_HOST=http://127.0.0.1:11434
+
+# Optional preflight test endpoint before PR
+PREFLIGHT_ENDPOINT=https://your-runner.example.com/preflight
+```
+
+3. Run app:
    `npm run dev`
 
-## Security model (important)
+## Production Agent Flow
 
-- All LLM provider keys are stored and used **only on the server** (`/api/agent`).
-- Client code now calls `fetch('/api/agent', ...)` and never reads `process.env.API_KEY` or `VITE_*_API_KEY`.
-- Live audio sessions use a server-created ephemeral session id instead of exposing provider API keys in the browser.
+Frontend calls `/api/agent` and the serverless agent performs:
+
+1. Read repo metadata and default branch from GitHub
+2. Create branch from default branch
+3. Generate patch JSON with LLM
+4. Validate + path guard (`../`, absolute path, `.git/`, size limits)
+5. Upsert files (include `sha` for updates)
+6. Open pull request using `head: owner:branch` and `base: default_branch`
+
+All writes happen through GitHub API and are reviewable via PR.
