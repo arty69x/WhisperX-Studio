@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* ── High Density Design Tokens ── */
+:root {
+  --bg-dark: #06000f;
+  --bg-card: #0d001a;
+  --border:  #1c1c1c;
+  --glass:        rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-hover:  rgba(255, 255, 255, 0.08);
+  
+  --primary:      #00e5a0; /* Neon Mint */
+  --secondary:    #ff2d6b; /* Neon Pink */
+  --violet:       #8b00ff; /* Purple */
+  --cyan:         #00d1ff; /* Cyan */
+  --yellow:       #ffcc00; /* Yellow */
+  
+  --text:         #ffffff;
+  --text-soft:    #b3b3b3;
+  --text-muted:   #666666;
+  
+  --sidebar-w:    232px;
+}
+
+/* ── Base Styles ── */
+*, *::before, *::after { box-sizing: border-box; border-color: var(--border); }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background-color: var(--bg-dark);
+  color: var(--text);
+  font-family: var(--font-inter), ui-sans-serif, system-ui;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-syne), sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono), monospace;
+}
+
+/* ── High Density Layout & Components ── */
+.hd-border { border: 1px solid var(--border); }
+.hd-border-r { border-right: 1px solid var(--border); }
+.hd-border-b { border-bottom: 1px solid var(--border); }
+.hd-border-l { border-left: 1px solid var(--border); }
+.hd-border-t { border-top: 1px solid var(--border); }
+
+.hd-hover:hover { background-color: var(--glass-hover); }
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* ── Canvas Studio / Node Overrides ── */
+.canvas-node {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+/* ── Prose & Content ── */
+.ProseMirror { outline: none; }
+.ProseMirror p { margin: 0.5rem 0; font-size: 0.9rem; color: var(--text-soft); }
+
+/* ── Glass Morphism (Refined for HD) ── */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--glass-border);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--primary), var(--violet));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

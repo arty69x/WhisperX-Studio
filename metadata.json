@@ -1,0 +1,9 @@
+{
+  "name": "TaskOS Pro",
+  "description": "Professional PM Studio with Kanban, AI Agent, Slide Studio, Flow Builder, and Analytics. Featuring glass-morphism design.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": []
+}
